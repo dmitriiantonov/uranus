@@ -1,0 +1,32 @@
+pub(crate) const SELECT: &str = "SELECT";
+pub(crate) const INSERT_INTO: &str = "INSERT INTO";
+pub(crate) const UPDATE: &str = "UPDATE";
+pub(crate) const FROM: &str = "FROM";
+pub(crate) const WHERE: &str = "WHERE";
+pub(crate) const AND: &str = "AND";
+pub(crate) const VALUES: &str = "VALUES";
+pub(crate) const SET: &str = "SET";
+pub(crate) const DELETE: &str = "DELETE";
+pub(crate) const CREATE_TABLE: &str ="CREATE TABLE";
+pub(crate) const ALTER_TABLE: &str = "ALTER_TABLE";
+pub(crate) const ADD: &str = "ADD";
+pub(crate) const DROP: &str = "DROP";
+pub(crate) const PRIMARY_KEY: &str ="PRIMARY KEY";
+pub(crate) const UUID: &str = "UUID";
+pub(crate) const INT: &str = "INT";
+pub(crate) const LONG: &str = "LONG";
+pub(crate) const FLOAT: &str = "FLOAT";
+pub(crate) const DOUBLE: &str = "DOUBLE";
+pub(crate) const TEXT: &str = "TEXT";
+pub(crate) const TIMESTAMP: &str = "TIMESTAMP";
+pub(crate) const BOOL: &str = "BOOL";
+pub (crate) const FALSE: &str = "FALSE";
+pub (crate) const TRUE: &str = "TRUE";
+pub (crate) const EQUALS: &str = "=";
+pub (crate) const NOT_EQUALS: &str = "!=";
+pub (crate) const GREATER: &str = ">";
+pub (crate) const GREATER_OR_EQUALS: &str = ">=";
+pub (crate) const LESS: &str = "<";
+pub (crate) const LESS_OR_EQUALS: &str = "<=";
+
+

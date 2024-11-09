@@ -1,195 +1,27 @@
-use crate::query_processor::dml_parser::keyword::*;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case, take_while1};
-use nom::character::complete::{digit1, i64 as parse_i64, multispace0};
-use nom::combinator::{map, map_res, opt, recognize};
+use nom::bytes::complete::tag;
+use nom::combinator::map;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, tuple};
-use nom::{IResult};
-use std::error::Error;
-use std::fmt::{Display, Formatter};
+use nom::IResult;
+use crate::query_parser::common_parser;
+use crate::query_parser::keyword::*;
+use crate::query_parser::query::{Condition, DeleteQuery, InsertQuery, Operator, Query, QueryParsingError, SelectQuery, UpdateQuery, Value};
 
-mod keyword {
-    pub(super) const SELECT: &str = "SELECT";
-    pub(super) const INSERT_INTO: &str = "INSERT INTO";
-    pub(super) const UPDATE: &str = "UPDATE";
-    pub(super) const FROM: &str = "FROM";
-    pub(super) const WHERE: &str = "WHERE";
-    pub(super) const AND: &str = "AND";
-    pub(super) const VALUES: &str = "VALUES";
-    pub(super) const SET: &str = "SET";
-    pub (super) const DELETE: &str = "DELETE";
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum Query {
-    Select(SelectQuery),
-    Insert(InsertQuery),
-    Update(UpdateQuery),
-    Delete(DeleteQuery),
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct SelectQuery {
-    columns: Vec<String>,
-    table: String,
-    conditions: Vec<Condition>,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct InsertQuery {
-    columns: Vec<String>,
-    values: Vec<Value>,
-    table: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct UpdateQuery {
-    table: String,
-    values: Vec<(String, Value)>,
-    conditions: Vec<Condition>,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub (crate) struct DeleteQuery {
-    columns: Vec<String>,
-    table: String,
-    conditions: Vec<Condition>,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct Condition {
-    column: String,
-    operator: Operator,
-    value: Value,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum Operator {
-    Equals,
-    NotEquals,
-    Greater,
-    GreaterOrEquals,
-    Less,
-    LessOrEquals,
-}
-
-#[derive(Debug)]
-pub(crate) enum Value {
-    Integer(i64),
-    Float(f64),
-    String(String),
-    Bool(bool),
-}
-
-enum QueryType {
-    Select,
-    Insert,
-    Update,
-    Delete
-}
-
-impl SelectQuery {
-    fn new(columns: Vec<String>, table: String, conditions: Vec<Condition>) -> Self {
-        Self { columns, table, conditions }
-    }
-}
-
-impl InsertQuery {
-    fn new(columns: Vec<String>, table: String, values: Vec<Value>) -> Self {
-        Self { columns, table, values }
-    }
-}
-
-impl UpdateQuery {
-    fn new(table: String, values: Vec<(String, Value)>, conditions: Vec<Condition>) -> Self {
-        Self { table, values, conditions }
-    }
-}
-
-impl DeleteQuery {
-    fn new(columns: Vec<String>, table: String, conditions: Vec<Condition>) -> Self {
-        Self { columns, table, conditions }
-    }
-}
-
-impl Condition {
-    fn new(column: String, operator: Operator, value: Value) -> Self {
-        Self { column, operator, value }
-    }
-}
-
-#[derive(Debug)]
-#[derive(PartialEq)]
-pub(crate) enum QueryParsingError {
-    UnsupportedRequest(String),
-    QuerySyntaxError(String, String),
-}
-
-impl Eq for Value {}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::Integer(x), Value::Integer(y)) => x == y,
-            (Value::Float(x), Value::Float(y)) => f64::eq(x, y),
-            (Value::String(x), Value::String(y)) => x.eq(y),
-            (Value::Bool(x), Value::Bool(y)) => x == y,
-            _ => false
-        }
-    }
-}
-
-impl Display for QueryParsingError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            QueryParsingError::UnsupportedRequest(query) => write!(f, "the request {} is not supported", query),
-            QueryParsingError::QuerySyntaxError(msg, query) => write!(f, "an syntax error {} occurred while parsing the request {}", msg, query)
-        }
-    }
-}
-
-impl Error for QueryParsingError {}
-
-pub(crate) fn parse_query(query: &str) -> Result<Query, QueryParsingError> {
-    let query_type = get_query_type(query)?;
-
-    match query_type {
-        QueryType::Select => parse_select_query(query),
-        QueryType::Insert => parse_insert(query),
-        QueryType::Update => parse_update(query),
-        QueryType::Delete => parse_delete(query),
-    }
-}
-
-fn get_query_type(query: &str) -> Result<QueryType, QueryParsingError> {
-    let query_type_result: IResult<&str, QueryType> = alt((
-        map(parse_keyword(SELECT), |_| QueryType::Select),
-        map(parse_keyword(INSERT_INTO), |_| QueryType::Insert),
-        map(parse_keyword(UPDATE), |_| QueryType::Update),
-        map(parse_keyword(DELETE), |_| QueryType::Delete),
-    ))(query);
-
-    match query_type_result {
-        Ok((_, query_type)) => Ok(query_type),
-        Err(_) => Err(QueryParsingError::UnsupportedRequest(query.to_string()))
-    }
-}
-
-fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
-    let query = match parse_keyword(SELECT)(query) {
+pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
+    let query = match common_parser::parse_keyword(SELECT)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the select keyword".to_string(), query.to_string()))
     };
 
     let parsing_result: IResult<&str, Vec<String>> = alt((
         map(
-            ws(tag("*")),
+            common_parser::ws(tag("*")),
             |_| Vec::new(),
         ),
         separated_list1(
-            ws(tag(",")),
-            parse_identifier,
+            common_parser::ws(tag(",")),
+            common_parser::parse_identifier,
         )
     ))(query);
 
@@ -198,12 +30,12 @@ fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the column names or *".to_string(), query.to_string()))
     };
 
-    let query = match parse_keyword(FROM)(query) {
+    let query = match common_parser::parse_keyword(FROM)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the from keyword".to_string(), query.to_string()))
     };
 
-    let (query, table) = match parse_identifier(query) {
+    let (query, table) = match common_parser::parse_identifier(query) {
         Ok((query, table)) => (query, table),
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the table name".to_string(), query.to_string()))
     };
@@ -217,49 +49,49 @@ fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
 }
 
 fn parse_conditions(query: &str) -> IResult<&str, Vec<Condition>> {
-    match parse_keyword(WHERE)(query) {
-        Ok((query, _)) => separated_list1(parse_keyword(AND), parse_condition)(query),
+    match common_parser::parse_keyword(WHERE)(query) {
+        Ok((query, _)) => separated_list1(common_parser::parse_keyword(AND), parse_condition)(query),
         Err(_) => Ok((query, Vec::new()))
     }
 }
 
-fn parse_condition(query: &str) -> IResult<&str, Condition> {
-    let (query, column) = parse_identifier(query)?;
+pub (crate) fn parse_condition(query: &str) -> IResult<&str, Condition> {
+    let (query, column) = common_parser::parse_identifier(query)?;
 
     let (query, operator) = alt((
-        map(ws(tag(">=")), |_| Operator::GreaterOrEquals),
-        map(ws(tag("<=")), |_| Operator::LessOrEquals),
-        map(ws(tag(">")), |_| Operator::Greater),
-        map(ws(tag("<")), |_| Operator::Less),
-        map(ws(tag("=")), |_| Operator::Equals),
-        map(ws(tag("!=")), |_| Operator::NotEquals),
+        map(common_parser::ws(tag(">=")), |_| Operator::GreaterOrEquals),
+        map(common_parser::ws(tag("<=")), |_| Operator::LessOrEquals),
+        map(common_parser::ws(tag(">")), |_| Operator::Greater),
+        map(common_parser::ws(tag("<")), |_| Operator::Less),
+        map(common_parser::ws(tag("=")), |_| Operator::Equals),
+        map(common_parser::ws(tag("!=")), |_| Operator::NotEquals),
     ))(query)?;
 
     let (query, value) = alt((
-        parse_float,
-        parse_integer,
-        map(ws(tag("false")), |_| Value::Bool(false)),
-        map(ws(tag("true")), |_| Value::Bool(true)),
-        parse_string
+        common_parser::parse_float,
+        common_parser::parse_integer,
+        map(common_parser::ws(tag("false")), |_| Value::Bool(false)),
+        map(common_parser::ws(tag("true")), |_| Value::Bool(true)),
+        common_parser::parse_string
     ))(query)?;
 
     Ok((query, Condition { column, operator, value }))
 }
 
-fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
-    let query = match parse_keyword(INSERT_INTO)(query) {
+pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
+    let query = match common_parser::parse_keyword(INSERT_INTO)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the insert into keyword".to_string(), query.to_string()))
     };
 
-    let (query, table) = match parse_identifier(query) {
+    let (query, table) = match common_parser::parse_identifier(query) {
         Ok((query, table)) => (query, table),
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the table name".to_string(), query.to_string()))
     };
 
-    let parsing_result = ws(delimited(
+    let parsing_result = common_parser::ws(delimited(
         tag("("),
-        separated_list1(ws(tag(",")), parse_identifier),
+        separated_list1(common_parser::ws(tag(",")), common_parser::parse_identifier),
         tag(")"),
     ))(query);
 
@@ -268,14 +100,14 @@ fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing column names".to_string(), query.to_string()))
     };
 
-    let query = match parse_keyword(VALUES)(query) {
+    let query = match common_parser::parse_keyword(VALUES)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the values keyword".to_string(), query.to_string()))
     };
 
-    let parsing_result = ws(delimited(
+    let parsing_result = common_parser::ws(delimited(
         tag("("),
-        separated_list1(ws(tag(",")), parse_value),
+        separated_list1(common_parser::ws(tag(",")), common_parser::parse_value),
         tag(")"),
     ))(query);
 
@@ -287,26 +119,26 @@ fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
     Ok(Query::Insert(InsertQuery::new(columns, table, values)))
 }
 
-fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
-    let query = match parse_keyword(UPDATE)(query) {
+pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
+    let query = match common_parser::parse_keyword(UPDATE)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing update keyword".to_string(), query.to_string()))
     };
 
-    let (query, table) = match parse_identifier(query) {
+    let (query, table) = match common_parser::parse_identifier(query) {
         Ok(result) => result,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing the table name".to_string(), query.to_string()))
     };
 
-    let query = match parse_keyword(SET)(query) {
+    let query = match common_parser::parse_keyword(SET)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected set keyword".to_string(), query.to_string()))
     };
 
     let (query, values) = match separated_list1(
-        ws(tag(",")),
+        common_parser::ws(tag(",")),
         map(
-            tuple((parse_identifier, ws(tag("=")), parse_value)),
+            tuple((common_parser::parse_identifier, common_parser::ws(tag("=")), common_parser::parse_value)),
             |(column, _, value)| (column, value),
         ),
     )(query) {
@@ -322,16 +154,16 @@ fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
     Ok(Query::Update(UpdateQuery::new(table, values, conditions)))
 }
 
-fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
-    let query = match parse_keyword(DELETE)(query) {
+pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
+    let query = match common_parser::parse_keyword(DELETE)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing delete keyword".to_string(), query.to_string()))
     };
     
-    let (query, columns) = match parse_keyword(FROM)(query) {
+    let (query, columns) = match common_parser::parse_keyword(FROM)(query) {
         Ok((query,_)) => (query, Vec::new()),
-        Err(_) => match separated_list1(ws(tag(",")), parse_identifier)(query) {
-            Ok((query, columns)) => match parse_keyword(FROM)(query) {
+        Err(_) => match separated_list1(common_parser::ws(tag(",")), common_parser::parse_identifier)(query) {
+            Ok((query, columns)) => match common_parser::parse_keyword(FROM)(query) {
                 Ok((query, _)) => (query, columns),
                 Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing from keyword".to_string(), query.to_string()))
             },
@@ -339,7 +171,7 @@ fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
         }
     };
 
-    let (query, table) = match parse_identifier(query) {
+    let (query, table) = match common_parser::parse_identifier(query) {
         Ok(result) => result,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing the table name".to_string(), query.to_string()))
     };
@@ -352,52 +184,9 @@ fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
     Ok(Query::Delete(DeleteQuery::new(columns, table, conditions)))
 }
 
-fn parse_keyword<'a>(keyword: &'a str) -> impl FnMut(&'a str) -> IResult<&'a str, &'a str> {
-    ws(tag_no_case(keyword))
-}
-
-fn parse_value(input: &str) -> IResult<&str, Value> {
-    alt((
-        parse_float,
-        parse_integer,
-        map(ws(tag("false")), |_| Value::Bool(false)),
-        map(ws(tag("true")), |_| Value::Bool(true)),
-        parse_string
-    ))(input)
-}
-
-fn parse_string(input: &str) -> IResult<&str, Value> {
-    let string_parser = ws(delimited(tag("'"), take_while1(|ch: char| ch != '\''), tag("'")));
-    map(string_parser, |string: &str| Value::String(string.to_string()))(input)
-}
-
-fn parse_float(input: &str) -> IResult<&str, Value> {
-    ws(map_res(
-        recognize(tuple((opt(tag("-")), digit1, tag("."), digit1))),
-        |s: &str| { s.parse::<f64>().map(Value::Float) },
-    ))(input)
-}
-
-fn parse_integer(input: &str) -> IResult<&str, Value> {
-    ws(map(parse_i64, Value::Integer))(input)
-}
-
-fn parse_identifier(input: &str) -> IResult<&str, String> {
-    let filter = |ch: char| -> bool {
-        ch.is_alphabetic() || ch == '_'
-    };
-    ws(map(take_while1(filter), String::from))(input)
-}
-
-pub fn ws<'a, F: 'a, O>(f: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
-where
-    F: FnMut(&'a str) -> IResult<&'a str, O>,
-{
-    delimited(multispace0, f, multispace0)
-}
-
 #[cfg(test)]
 mod test {
+    use crate::query_parser::parser::parse_query;
     use super::*;
 
     #[test]
