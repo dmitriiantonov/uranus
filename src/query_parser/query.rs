@@ -1,11 +1,24 @@
-use crate::metadata::types::ColumnType;
+use std::fmt::Debug;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum Query {
+    DataManipulationQuery(DataManipulationQuery),
+    DataDefinitionQuery(DataDefinitionQuery),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum DataManipulationQuery {
     Select(SelectQuery),
     Insert(InsertQuery),
     Update(UpdateQuery),
     Delete(DeleteQuery),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum DataDefinitionQuery {
+    CreateTable(CreateTableQuery),
+    AlterTable(AlterTableQuery),
+    DropTable(DropTableQuery),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -26,6 +39,7 @@ pub enum QueryType {
     Delete,
     CreateTable,
     AlterTable,
+    DropTable
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -57,10 +71,10 @@ pub(crate) struct DeleteQuery {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) struct CreateTable {
+pub(crate) struct CreateTableQuery {
     pub(crate) table: String,
     pub(crate) primary_key: PrimaryKey,
-    pub(crate) columns: Vec<ColumnType>,
+    pub(crate) columns: Vec<Column>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -76,13 +90,38 @@ pub(crate) struct Column {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) struct AlterTable {}
+pub(crate) struct AlterTableQuery {
+    pub(crate) table: String,
+    pub(crate) conditions: Vec<AlterTableCondition>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct DropTableQuery {
+    pub(crate) table: String,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct Condition {
-    pub (crate) column: String,
-    pub (crate) operator: Operator,
-    pub (crate) value: Value,
+    pub(crate) column: String,
+    pub(crate) operator: Operator,
+    pub(crate) value: Value,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum AlterTableCondition {
+    AddColumn(AddColumnCondition),
+    DropColumn(DropColumnCondition),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct AddColumnCondition {
+    pub(crate) column_name: String,
+    pub(crate) column_type: ColumnType,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct DropColumnCondition {
+    pub(crate) column_name: String,
 }
 
 #[derive(Debug)]
@@ -91,6 +130,18 @@ pub(crate) enum Value {
     Float(f64),
     String(String),
     Bool(bool),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum ColumnType {
+    Uuid,
+    Int,
+    Long,
+    Float,
+    Double,
+    Timestamp,
+    Text,
+    Bool,
 }
 
 impl SelectQuery {
