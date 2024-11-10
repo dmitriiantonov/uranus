@@ -14,7 +14,8 @@ pub(crate) fn parse_query(query: &str) -> Result<Query, QueryParsingError> {
         QueryType::Update => dml_parser::parse_update(query),
         QueryType::Delete => dml_parser::parse_delete(query),
         QueryType::CreateTable => ddl_parser::parse_create_table_query(query),
-        QueryType::AlterTable => ddl_parser::parse_alter_table_query(query)
+        QueryType::AlterTable => ddl_parser::parse_alter_table_query(query),
+        QueryType::DropTable => ddl_parser::parse_drop_table_query(query),
     }
 }
 
@@ -24,8 +25,9 @@ fn get_query_type(query: &str) -> Result<QueryType, QueryParsingError> {
         map(common_parser::parse_keyword(INSERT_INTO), |_| QueryType::Insert),
         map(common_parser::parse_keyword(UPDATE), |_| QueryType::Update),
         map(common_parser::parse_keyword(DELETE), |_| QueryType::Delete),
-        map(common_parser::parse_keyword(CREATE_TABLE), |_| QueryType::Delete),
-        map(common_parser::parse_keyword(ALTER_TABLE), |_| QueryType::Delete),
+        map(common_parser::parse_keyword(CREATE_TABLE), |_| QueryType::CreateTable),
+        map(common_parser::parse_keyword(ALTER_TABLE), |_| QueryType::AlterTable),
+        map(common_parser::parse_keyword(DROP_TABLE), |_| QueryType::DropTable),
     ))(query);
 
     match query_type_result {

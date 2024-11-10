@@ -4,9 +4,10 @@ use nom::combinator::map;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
+use common_parser::ws;
 use crate::query_parser::common_parser;
 use crate::query_parser::keyword::*;
-use crate::query_parser::query::{Condition, DeleteQuery, InsertQuery, Operator, Query, QueryParsingError, SelectQuery, UpdateQuery, Value};
+use crate::query_parser::query::{Condition, DataManipulationQuery, DeleteQuery, InsertQuery, Operator, Query, QueryParsingError, SelectQuery, UpdateQuery, Value};
 
 pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
     let query = match common_parser::parse_keyword(SELECT)(query) {
@@ -16,11 +17,11 @@ pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingErro
 
     let parsing_result: IResult<&str, Vec<String>> = alt((
         map(
-            common_parser::ws(tag("*")),
+            ws(tag("*")),
             |_| Vec::new(),
         ),
         separated_list1(
-            common_parser::ws(tag(",")),
+            ws(tag(",")),
             common_parser::parse_identifier,
         )
     ))(query);
@@ -45,7 +46,7 @@ pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingErro
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing where condition".to_string(), query.to_string()))
     };
 
-    Ok(Query::Select(SelectQuery::new(columns, table, conditions)))
+    Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(SelectQuery::new(columns, table, conditions))))
 }
 
 fn parse_conditions(query: &str) -> IResult<&str, Vec<Condition>> {
@@ -59,19 +60,19 @@ pub (crate) fn parse_condition(query: &str) -> IResult<&str, Condition> {
     let (query, column) = common_parser::parse_identifier(query)?;
 
     let (query, operator) = alt((
-        map(common_parser::ws(tag(">=")), |_| Operator::GreaterOrEquals),
-        map(common_parser::ws(tag("<=")), |_| Operator::LessOrEquals),
-        map(common_parser::ws(tag(">")), |_| Operator::Greater),
-        map(common_parser::ws(tag("<")), |_| Operator::Less),
-        map(common_parser::ws(tag("=")), |_| Operator::Equals),
-        map(common_parser::ws(tag("!=")), |_| Operator::NotEquals),
+        map(ws(tag(">=")), |_| Operator::GreaterOrEquals),
+        map(ws(tag("<=")), |_| Operator::LessOrEquals),
+        map(ws(tag(">")), |_| Operator::Greater),
+        map(ws(tag("<")), |_| Operator::Less),
+        map(ws(tag("=")), |_| Operator::Equals),
+        map(ws(tag("!=")), |_| Operator::NotEquals),
     ))(query)?;
 
     let (query, value) = alt((
         common_parser::parse_float,
         common_parser::parse_integer,
-        map(common_parser::ws(tag("false")), |_| Value::Bool(false)),
-        map(common_parser::ws(tag("true")), |_| Value::Bool(true)),
+        map(ws(tag("false")), |_| Value::Bool(false)),
+        map(ws(tag("true")), |_| Value::Bool(true)),
         common_parser::parse_string
     ))(query)?;
 
@@ -89,9 +90,9 @@ pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the table name".to_string(), query.to_string()))
     };
 
-    let parsing_result = common_parser::ws(delimited(
+    let parsing_result = ws(delimited(
         tag("("),
-        separated_list1(common_parser::ws(tag(",")), common_parser::parse_identifier),
+        separated_list1(ws(tag(",")), common_parser::parse_identifier),
         tag(")"),
     ))(query);
 
@@ -105,9 +106,9 @@ pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the values keyword".to_string(), query.to_string()))
     };
 
-    let parsing_result = common_parser::ws(delimited(
+    let parsing_result = ws(delimited(
         tag("("),
-        separated_list1(common_parser::ws(tag(",")), common_parser::parse_value),
+        separated_list1(ws(tag(",")), common_parser::parse_value),
         tag(")"),
     ))(query);
 
@@ -116,7 +117,7 @@ pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing values".to_string(), query.to_string()))
     };
 
-    Ok(Query::Insert(InsertQuery::new(columns, table, values)))
+    Ok(Query::DataManipulationQuery(DataManipulationQuery::Insert(InsertQuery::new(columns, table, values))))
 }
 
 pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
@@ -136,9 +137,9 @@ pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
     };
 
     let (query, values) = match separated_list1(
-        common_parser::ws(tag(",")),
+        ws(tag(",")),
         map(
-            tuple((common_parser::parse_identifier, common_parser::ws(tag("=")), common_parser::parse_value)),
+            tuple((common_parser::parse_identifier, ws(tag("=")), common_parser::parse_value)),
             |(column, _, value)| (column, value),
         ),
     )(query) {
@@ -151,7 +152,7 @@ pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing where condition".to_string(), query.to_string()))
     };
 
-    Ok(Query::Update(UpdateQuery::new(table, values, conditions)))
+    Ok(Query::DataManipulationQuery(DataManipulationQuery::Update(UpdateQuery::new(table, values, conditions))))
 }
 
 pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
@@ -162,7 +163,7 @@ pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
     
     let (query, columns) = match common_parser::parse_keyword(FROM)(query) {
         Ok((query,_)) => (query, Vec::new()),
-        Err(_) => match separated_list1(common_parser::ws(tag(",")), common_parser::parse_identifier)(query) {
+        Err(_) => match separated_list1(ws(tag(",")), common_parser::parse_identifier)(query) {
             Ok((query, columns)) => match common_parser::parse_keyword(FROM)(query) {
                 Ok((query, _)) => (query, columns),
                 Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing from keyword".to_string(), query.to_string()))
@@ -181,7 +182,7 @@ pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing where condition".to_string(), query.to_string()))
     };
 
-    Ok(Query::Delete(DeleteQuery::new(columns, table, conditions)))
+    Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(DeleteQuery::new(columns, table, conditions))))
 }
 
 #[cfg(test)]
@@ -192,13 +193,15 @@ mod test {
     #[test]
     fn test_select_all() {
         let query = "select * from sensors";
-        assert_eq!(parse_query(query), Ok(Query::Select(SelectQuery::new(vec![], "sensors".to_string(), vec![]))));
+        let expected_result = SelectQuery::new(vec![], "sensors".to_string(), vec![]);
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
     }
 
     #[test]
     fn test_select_all_formated() {
         let query = "select * \n\rfrom sensors";
-        assert_eq!(parse_query(query), Ok(Query::Select(SelectQuery::new(vec![], "sensors".to_string(), vec![]))));
+        let expected_result = SelectQuery::new(vec![], "sensors".to_string(), vec![]);
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
     }
 
     #[test]
@@ -213,7 +216,7 @@ mod test {
                 Condition::new("timestamp".to_string(), Operator::LessOrEquals, Value::String("2024-11-01 00:00:00".to_string())),
             ],
         );
-        assert_eq!(parse_query(query), Ok(Query::Select(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
     }
 
     #[test]
@@ -234,7 +237,7 @@ mod test {
             ],
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Select(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
     }
 
     #[test]
@@ -251,7 +254,7 @@ mod test {
             ],
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Select(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
     }
 
     #[test]
@@ -277,7 +280,7 @@ mod test {
             ],
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Insert(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Insert(expected_result))));
     }
     
     #[test]
@@ -301,7 +304,7 @@ mod test {
             ]
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Update(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Update(expected_result))));
     }
     
     #[test]
@@ -320,7 +323,7 @@ mod test {
             ]
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Delete(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(expected_result))));
     }
 
     #[test]
@@ -342,6 +345,6 @@ mod test {
             ]
         );
 
-        assert_eq!(parse_query(query), Ok(Query::Delete(expected_result)));
+        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(expected_result))));
     }
 }
