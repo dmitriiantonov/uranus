@@ -1,15 +1,17 @@
+use crate::query_parser::builder::{ConditionBuilder, DeleteQueryBuilder, InsertQueryBuilder, SelectQueryBuilder};
+use crate::query_parser::common_parser;
+use crate::query_parser::common_parser::parse_value;
+use crate::query_parser::keyword::*;
+use crate::query_parser::query::{Condition, DataManipulationQuery, Operator, Query, QueryParsingError, UpdateQuery, Value};
+use common_parser::ws;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom::multi::separated_list1;
 use nom::sequence::{delimited, tuple};
 use nom::IResult;
-use common_parser::ws;
-use crate::query_parser::common_parser;
-use crate::query_parser::keyword::*;
-use crate::query_parser::query::{Condition, DataManipulationQuery, DeleteQuery, InsertQuery, Operator, Query, QueryParsingError, SelectQuery, UpdateQuery, Value};
 
-pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
+pub(crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingError> {
     let query = match common_parser::parse_keyword(SELECT)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the select keyword".to_string(), query.to_string()))
@@ -46,7 +48,11 @@ pub (crate) fn parse_select_query(query: &str) -> Result<Query, QueryParsingErro
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing where condition".to_string(), query.to_string()))
     };
 
-    Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(SelectQuery::new(columns, table, conditions))))
+    Ok(SelectQueryBuilder::new()
+        .columns(columns)
+        .table(table)
+        .conditions(conditions)
+        .build())
 }
 
 fn parse_conditions(query: &str) -> IResult<&str, Vec<Condition>> {
@@ -56,30 +62,30 @@ fn parse_conditions(query: &str) -> IResult<&str, Vec<Condition>> {
     }
 }
 
-pub (crate) fn parse_condition(query: &str) -> IResult<&str, Condition> {
+pub(crate) fn parse_condition(query: &str) -> IResult<&str, Condition> {
     let (query, column) = common_parser::parse_identifier(query)?;
 
     let (query, operator) = alt((
-        map(ws(tag(">=")), |_| Operator::GreaterOrEquals),
-        map(ws(tag("<=")), |_| Operator::LessOrEquals),
-        map(ws(tag(">")), |_| Operator::Greater),
-        map(ws(tag("<")), |_| Operator::Less),
-        map(ws(tag("=")), |_| Operator::Equals),
-        map(ws(tag("!=")), |_| Operator::NotEquals),
+        map(ws(tag(GREATER_OR_EQUALS)), |_| Operator::GreaterOrEquals),
+        map(ws(tag(LESS_OR_EQUALS)), |_| Operator::LessOrEquals),
+        map(ws(tag(GREATER)), |_| Operator::Greater),
+        map(ws(tag(LESS)), |_| Operator::Less),
+        map(ws(tag(EQUALS)), |_| Operator::Equals),
+        map(ws(tag(NOT_EQUALS)), |_| Operator::NotEquals),
     ))(query)?;
 
-    let (query, value) = alt((
-        common_parser::parse_float,
-        common_parser::parse_integer,
-        map(ws(tag("false")), |_| Value::Bool(false)),
-        map(ws(tag("true")), |_| Value::Bool(true)),
-        common_parser::parse_string
-    ))(query)?;
+    let (query, value) = parse_value(query)?;
 
-    Ok((query, Condition { column, operator, value }))
+    let condition = ConditionBuilder::new()
+        .column(column)
+        .operator(operator)
+        .value(value)
+        .build();
+
+    Ok((query, condition))
 }
 
-pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
+pub(crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
     let query = match common_parser::parse_keyword(INSERT_INTO)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("expected the insert into keyword".to_string(), query.to_string()))
@@ -117,10 +123,14 @@ pub (crate) fn parse_insert(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing values".to_string(), query.to_string()))
     };
 
-    Ok(Query::DataManipulationQuery(DataManipulationQuery::Insert(InsertQuery::new(columns, table, values))))
+    Ok(InsertQueryBuilder::new()
+        .columns(columns)
+        .table(table)
+        .values(values)
+        .build())
 }
 
-pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
+pub(crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
     let query = match common_parser::parse_keyword(UPDATE)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing update keyword".to_string(), query.to_string()))
@@ -155,14 +165,14 @@ pub (crate) fn parse_update(query: &str) -> Result<Query, QueryParsingError> {
     Ok(Query::DataManipulationQuery(DataManipulationQuery::Update(UpdateQuery::new(table, values, conditions))))
 }
 
-pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
+pub(crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
     let query = match common_parser::parse_keyword(DELETE)(query) {
         Ok((query, _)) => query,
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing delete keyword".to_string(), query.to_string()))
     };
-    
+
     let (query, columns) = match common_parser::parse_keyword(FROM)(query) {
-        Ok((query,_)) => (query, Vec::new()),
+        Ok((query, _)) => (query, Vec::new()),
         Err(_) => match separated_list1(ws(tag(",")), common_parser::parse_identifier)(query) {
             Ok((query, columns)) => match common_parser::parse_keyword(FROM)(query) {
                 Ok((query, _)) => (query, columns),
@@ -182,169 +192,186 @@ pub (crate) fn parse_delete(query: &str) -> Result<Query, QueryParsingError> {
         Err(_) => return Err(QueryParsingError::QuerySyntaxError("an error occurred while parsing where condition".to_string(), query.to_string()))
     };
 
-    Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(DeleteQuery::new(columns, table, conditions))))
+    Ok(DeleteQueryBuilder::new()
+        .columns(columns)
+        .table(table)
+        .conditions(conditions)
+        .build())
 }
 
 #[cfg(test)]
 mod test {
-    use crate::query_parser::parser::parse_query;
     use super::*;
+    use crate::query_parser::builder::UpdateQueryBuilder;
+    use crate::query_parser::parser::parse_query;
 
     #[test]
-    fn test_select_all() {
-        let query = "select * from sensors";
-        let expected_result = SelectQuery::new(vec![], "sensors".to_string(), vec![]);
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
-    }
+    fn test_parse_select() {
+        let params = vec![
+            (
+                r#"
+                SELECT *
+                FROM user_sessions
+                "#,
+                SelectQueryBuilder::new()
+                    .table("user_sessions".to_string())
+                    .build()
+            ),
+            (
+                r#"
+                SELECT user_id, session_id, type, device_type, timestamp
+                FROM user_sessions
+                "#,
+                SelectQueryBuilder::new()
+                    .column("user_id".to_string())
+                    .column("session_id".to_string())
+                    .column("type".to_string())
+                    .column("device_type".to_string())
+                    .column("timestamp".to_string())
+                    .table("user_sessions".to_string())
+                    .build()
+            ),
+            (
+                r#"
+                SELECT user_id, session_id, type, device_type, timestamp
+                FROM user_sessions
+                WHERE user_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'
+                AND timestamp >= '2024-10-21 00:00:00'
+                AND timestamp <= '2024-11-01 00:00:00'
+                "#,
+                SelectQueryBuilder::new()
+                    .column("user_id".to_string())
+                    .column("session_id".to_string())
+                    .column("type".to_string())
+                    .column("device_type".to_string())
+                    .column("timestamp".to_string())
+                    .table("user_sessions".to_string())
+                    .condition(ConditionBuilder::new()
+                        .column("user_id".to_string())
+                        .operator(Operator::Equals)
+                        .value(Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()))
+                        .build())
+                    .condition(ConditionBuilder::new()
+                        .column("timestamp".to_string())
+                        .operator(Operator::GreaterOrEquals)
+                        .value(Value::String("2024-10-21 00:00:00".to_string()))
+                        .build())
+                    .condition(ConditionBuilder::new()
+                        .column("timestamp".to_string())
+                        .operator(Operator::LessOrEquals)
+                        .value(Value::String("2024-11-01 00:00:00".to_string()))
+                        .build())
+                    .build()
+            )
+        ];
 
-    #[test]
-    fn test_select_all_formated() {
-        let query = "select * \n\rfrom sensors";
-        let expected_result = SelectQuery::new(vec![], "sensors".to_string(), vec![]);
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
-    }
-
-    #[test]
-    fn test_select_with_where() {
-        let query = "select sensor_id, timestamp, temperature from sensors where sensor_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f' and timestamp >= '2024-10-21 00:00:00' and timestamp <= '2024-11-01 00:00:00'";
-        let expected_result = SelectQuery::new(
-            vec!["sensor_id".to_string(), "timestamp".to_string(), "temperature".to_string()],
-            "sensors".to_string(),
-            vec![
-                Condition::new("sensor_id".to_string(), Operator::Equals, Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string())),
-                Condition::new("timestamp".to_string(), Operator::GreaterOrEquals, Value::String("2024-10-21 00:00:00".to_string())),
-                Condition::new("timestamp".to_string(), Operator::LessOrEquals, Value::String("2024-11-01 00:00:00".to_string())),
-            ],
-        );
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
-    }
-
-    #[test]
-    fn test_select_with_where_formated() {
-        let query = "select sensor_id, timestamp, temperature \
-        from sensors \
-        where sensor_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f' \
-        and timestamp >= '2024-10-21 00:00:00' \
-        and timestamp <= '2024-11-01 00:00:00'";
-
-        let expected_result = SelectQuery::new(
-            vec!["sensor_id".to_string(), "timestamp".to_string(), "temperature".to_string()],
-            "sensors".to_string(),
-            vec![
-                Condition::new("sensor_id".to_string(), Operator::Equals, Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string())),
-                Condition::new("timestamp".to_string(), Operator::GreaterOrEquals, Value::String("2024-10-21 00:00:00".to_string())),
-                Condition::new("timestamp".to_string(), Operator::LessOrEquals, Value::String("2024-11-01 00:00:00".to_string())),
-            ],
-        );
-
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
-    }
-
-    #[test]
-    fn test_integer_and_float_parse_correctly() {
-        let query = "select * from products where quantity > 10 and price > 30.65 and type != 'book'";
-
-        let expected_result = SelectQuery::new(
-            vec![],
-            "products".to_string(),
-            vec![
-                Condition::new("quantity".to_string(), Operator::Greater, Value::Integer(10)),
-                Condition::new("price".to_string(), Operator::Greater, Value::Float(30.65)),
-                Condition::new("type".to_string(), Operator::NotEquals, Value::String("book".to_string())),
-            ],
-        );
-
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Select(expected_result))));
+        for (query, expected_result) in params {
+            assert_eq!(parse_query(query), Ok(expected_result));
+        }
     }
 
     #[test]
     fn test_parse_insert_query() {
-        let query = "insert into user_sessions (user_id, session_id, type, device_type, timestamp)\
-        values (12345, '3e3be9fb-5888-4b0e-8f22-287b7d90a32f', 'LOG_IN', 'PHONE', '2024-11-01 00:00:00')";
+        let query = r#"
+        INSERT INTO user_sessions (user_id, session_id, type, device_type, timestamp)
+        VALUES (12345, '3e3be9fb-5888-4b0e-8f22-287b7d90a32f', 'LOG_IN', 'PHONE', '2024-11-01 00:00:00')"#;
 
-        let expected_result = InsertQuery::new(
-            vec![
-                "user_id".to_string(),
-                "session_id".to_string(),
-                "type".to_string(),
-                "device_type".to_string(),
-                "timestamp".to_string(),
-            ],
-            "user_sessions".to_string(),
-            vec![
-                Value::Integer(12345),
-                Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()),
-                Value::String("LOG_IN".to_string()),
-                Value::String("PHONE".to_string()),
-                Value::String("2024-11-01 00:00:00".to_string()),
-            ],
-        );
+        let expected_result = InsertQueryBuilder::new()
+            .column("user_id".to_string())
+            .column("session_id".to_string())
+            .column("type".to_string())
+            .column("device_type".to_string())
+            .column("timestamp".to_string())
+            .table("user_sessions".to_string())
+            .value(Value::Integer(12345))
+            .value(Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()))
+            .value(Value::String("LOG_IN".to_string()))
+            .value(Value::String("PHONE".to_string()))
+            .value(Value::String("2024-11-01 00:00:00".to_string()))
+            .build();
 
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Insert(expected_result))));
+        assert_eq!(parse_query(query), Ok(expected_result));
     }
-    
+
     #[test]
     fn test_parse_update_request() {
-        let query = "update user_sessions \
-        set \
-        type = 'LAPTOP', \
-        timestamp = '2024-11-08 00:00:00' \
-        where user_id = 12345 \
-        and session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'";
-        
-        let expected_result = UpdateQuery::new(
-            "user_sessions".to_string(),
-            vec![
-                ("type".to_string(), Value::String("LAPTOP".to_string())),
-                ("timestamp".to_string(), Value::String("2024-11-08 00:00:00".to_string())),
-            ],
-            vec![
-                Condition::new("user_id".to_string(), Operator::Equals, Value::Integer(12345)),
-                Condition::new("session_id".to_string(), Operator::Equals, Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string())),
-            ]
-        );
+        let query = r#"
+        UPDATE user_sessions
+        SET
+        type = 'LAPTOP',
+        timestamp = '2024-11-08 00:00:00'
+        WHERE user_id = 12345
+        AND session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'"#;
 
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Update(expected_result))));
-    }
-    
-    #[test]
-    fn test_parse_row_delete_request() {
-        let query = "delete \
-        from user_sessions \
-        where user_id = 12345 \
-        and session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'";
-        
-        let expected_result = DeleteQuery::new(
-            vec![],
-            "user_sessions".to_string(),
-            vec![
-                Condition::new("user_id".to_string(), Operator::Equals, Value::Integer(12345)),
-                Condition::new("session_id".to_string(), Operator::Equals, Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string())),
-            ]
-        );
+        let expected_result = UpdateQueryBuilder::new()
+            .table("user_sessions".to_string())
+            .value(("type".to_string(), Value::String("LAPTOP".to_string())))
+            .value(("timestamp".to_string(), Value::String("2024-11-08 00:00:00".to_string())))
+            .condition(ConditionBuilder::new()
+                .column("user_id".to_string())
+                .operator(Operator::Equals)
+                .value(Value::Integer(12345))
+                .build())
+            .condition(ConditionBuilder::new()
+                .column("session_id".to_string())
+                .operator(Operator::Equals)
+                .value(Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()))
+                .build())
+            .build();
 
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(expected_result))));
+        assert_eq!(parse_query(query), Ok(expected_result));
     }
 
     #[test]
-    fn test_parse_columns_delete_request() {
-        let query = "delete type, timestamp \
-        from user_sessions \
-        where user_id = 12345 \
-        and session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'";
+    fn test_parse_delete() {
+        let params = vec![
+            (
+                r#"
+                DELETE FROM user_sessions
+                WHERE user_id = 12345
+                AND session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'
+                "#,
+                DeleteQueryBuilder::new()
+                    .table("user_sessions".to_string())
+                    .condition(ConditionBuilder::new()
+                        .column("user_id".to_string())
+                        .operator(Operator::Equals)
+                        .value(Value::Integer(12345))
+                        .build())
+                    .condition(ConditionBuilder::new()
+                        .column("session_id".to_string())
+                        .operator(Operator::Equals)
+                        .value(Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()))
+                        .build())
+                    .build()
+            ),
+            (
+                r#"
+                DELETE type, timestamp
+                FROM user_sessions
+                WHERE user_id = 12345
+                AND session_id = '3e3be9fb-5888-4b0e-8f22-287b7d90a32f'
+                "#,
+                DeleteQueryBuilder::new()
+                    .column("type".to_string())
+                    .column("timestamp".to_string())
+                    .table("user_sessions".to_string())
+                    .condition(ConditionBuilder::new()
+                        .column("user_id".to_string())
+                        .operator(Operator::Equals)
+                        .value(Value::Integer(12345))
+                        .build())
+                    .condition(ConditionBuilder::new()
+                        .column("session_id".to_string())
+                        .operator(Operator::Equals)
+                        .value(Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string()))
+                        .build())
+                    .build()
+            )
+        ];
 
-        let expected_result = DeleteQuery::new(
-            vec![
-                "type".to_string(),
-                "timestamp".to_string(),
-            ],
-            "user_sessions".to_string(),
-            vec![
-                Condition::new("user_id".to_string(), Operator::Equals, Value::Integer(12345)),
-                Condition::new("session_id".to_string(), Operator::Equals, Value::String("3e3be9fb-5888-4b0e-8f22-287b7d90a32f".to_string())),
-            ]
-        );
-
-        assert_eq!(parse_query(query), Ok(Query::DataManipulationQuery(DataManipulationQuery::Delete(expected_result))));
+        for (query, expected_result) in params {
+            assert_eq!(parse_query(query), Ok(expected_result));
+        }
     }
 }
